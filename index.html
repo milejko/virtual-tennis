@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Virtual Tennis</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #000; overflow: hidden;
+      font-family: 'Courier New', Courier, monospace;
+      color: #fff; touch-action: none;
+    }
+    canvas { display: block; }
+    #overlay {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.88); z-index: 10;
+    }
+    #overlay.hidden { display: none; }
+    .screen {
+      display: none; flex-direction: column;
+      align-items: center; gap: 2vh;
+      width: 100%; max-width: 460px;
+      padding: 3vh 5vw; text-align: center;
+    }
+    .screen.active { display: flex; }
+    h1 {
+      font-size: clamp(2rem, 7vw, 3.8rem);
+      letter-spacing: 0.15em; text-transform: uppercase; line-height: 1.1;
+    }
+    h2 {
+      font-size: clamp(1.2rem, 4vw, 2rem);
+      letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    p { font-size: clamp(0.75rem, 2.2vw, 1rem); opacity: 0.6; }
+    .result { font-size: clamp(0.9rem, 2.5vw, 1.2rem); line-height: 1.9; }
+    .btn-col { display: flex; flex-direction: column; align-items: center; gap: 1.2vh; width: 100%; }
+    .btn-row { display: flex; flex-direction: row; gap: 2vw; flex-wrap: wrap; justify-content: center; }
+    button {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.45);
+      color: #fff; font-family: inherit;
+      font-size: clamp(0.8rem, 2.4vw, 1.05rem);
+      letter-spacing: 0.1em; text-transform: uppercase;
+      padding: 0.65em 1.8em; cursor: pointer; min-width: 9em;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    button:hover, button.sel {
+      background: rgba(255,255,255,0.14); border-color: #fff;
+    }
+    button.primary { border-color: rgba(255,255,255,0.75); font-size: clamp(0.9rem, 2.8vw, 1.2rem); }
+    button.ghost   { opacity: 0.45; font-size: clamp(0.7rem, 2vw, 0.88rem); }
+    .sep { width: 60%; border: none; border-top: 1px solid rgba(255,255,255,0.15); margin: 0.4vh 0; }
+    .code-box {
+      font-size: clamp(2rem, 9vw, 4rem);
+      letter-spacing: 0.3em; padding: 0.25em 0.6em;
+      border: 1px solid rgba(255,255,255,0.4);
+    }
+    input[type=text] {
+      background: transparent; border: 1px solid rgba(255,255,255,0.5);
+      color: #fff; font-family: inherit;
+      font-size: clamp(1.4rem, 5vw, 2.2rem);
+      letter-spacing: 0.3em; text-align: center; text-transform: uppercase;
+      padding: 0.3em 0.6em; width: 7.5em; outline: none;
+    }
+    input::placeholder { opacity: 0.3; letter-spacing: 0.05em; font-size: 0.55em; }
+    .status { font-size: clamp(0.7rem, 2vw, 0.88rem); opacity: 0.6; min-height: 1.4em; }
+  </style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="overlay">
+
+  <!-- SINGLE MENU SCREEN -->
+  <div id="s-menu" class="screen active">
+    <h1>Virtual<br>Tennis</h1>
+    <div class="btn-row" style="margin-top:0.5vh">
+      <button id="btn-m1p" class="sel" onclick="menuSelectMode('1p')">1 Gracz</button>
+      <button id="btn-m2p"            onclick="menuSelectMode('2p')">2 Graczy</button>
+    </div>
+    <hr class="sep" />
+    <!-- 1P section -->
+    <div id="sec-1p" class="btn-col">
+      <div class="btn-row">
+        <button id="btn-easy"   onclick="selectDiff('easy')">&#321;atwy</button>
+        <button id="btn-medium" onclick="selectDiff('medium')" class="sel">&#346;redni</button>
+        <button id="btn-hard"   onclick="selectDiff('hard')">Trudny</button>
+      </div>
+      <button class="primary" style="margin-top:0.5vh" onclick="start1P()">&#9654; Start</button>
+    </div>
+    <!-- 2P section -->
+    <div id="sec-2p" class="btn-col" style="display:none">
+      <button class="primary" onclick="Net.initHost()">&#128187; Utw&#243;rz gr&#281;</button>
+      <button class="primary" onclick="UI.show2PGuest()">&#128241; Do&#322;&#261;cz do gry</button>
+    </div>
+  </div>
+
+  <!-- 2P HOST WAITING -->
+  <div id="s-2p-host" class="screen">
+    <h2>Tw&#243;j kod gry</h2>
+    <div id="room-code" class="code-box">&#183;&#183;&#183;</div>
+    <p>Podaj ten kod drugiemu graczowi</p>
+    <div class="status" id="host-status">Czekam na po&#322;&#261;czenie&#8230;</div>
+    <button class="ghost" onclick="Net.cancel(); UI.showMain()">&#8592; Anuluj</button>
+  </div>
+
+  <!-- 2P GUEST JOIN -->
+  <div id="s-2p-guest" class="screen">
+    <h2>Do&#322;&#261;cz do gry</h2>
+    <input id="code-input" type="text" placeholder="wpisz kod" maxlength="6"
+           oninput="this.value=this.value.toUpperCase()"
+           onkeydown="if(event.key==='Enter') Net.joinGame()" />
+    <div class="btn-col">
+      <button class="primary" onclick="Net.joinGame()">Po&#322;&#261;cz</button>
+    </div>
+    <div class="status" id="guest-status"></div>
+    <button class="ghost" onclick="Net.cancel(); UI.showMain()">&#8592; Wr&#243;&#263;</button>
+  </div>
+
+  <!-- END SCREEN -->
+  <div id="s-end" class="screen">
+    <h2 id="end-title"></h2>
+    <div id="end-result" class="result"></div>
+    <div class="btn-col" style="margin-top:0.5vh">
+      <button class="primary" id="btn-rematch" onclick="doRematch()">&#9654; Zagraj ponownie</button>
+      <button class="ghost"   onclick="Net.cancel(); UI.showMain()">&#9776; Menu g&#322;&#243;wne</button>
+    </div>
+    <div class="status" id="end-status"></div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+'use strict';
+
+// ─────────────────────────────────────────────
+//  CONSTANTS
+// ─────────────────────────────────────────────
+const POINTS_SEQ    = [0, 15, 30, 40, 'G'];
+const GAMES_TO_SET  = 4;
+const SETS_TO_WIN   = 2;
+const SPEED_PER_SET = 0.10;
+
+const BASE_BALL_SPD   = 0.55;
+const BASE_PADDLE_SPD = 0.80;
+const PADDLE_W_FRAC   = 0.012;
+const PADDLE_H_FRAC   = 0.14;
+const PADDLE_H_BONUS  = 0.06;
+const PADDLE_X_MARGIN = 0.04;
+const BALL_SIZE_FRAC  = 0.018;
+const SMALL_W         = 500;
+const SMALL_SPD_MULT  = 0.82;
+
+const AI_CFG = {
+  easy:   { delay: 0.55, overshoot: 0.28 },
+  medium: { delay: 0.18, overshoot: 0.10 },
+  hard:   { delay: 0,    overshoot: 0    },
+};
+
+// ─────────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H;
+
+let gameMode    = '1p';   // '1p' | '2p-host' | '2p-guest'
+let menuMode    = '1p';   // last selected in menu
+let difficulty  = 'medium';
+let gameRunning = false;
+let raf         = null;
+let lastTime    = null;
+
+let playerPoints, aiPoints, playerGames, aiGames, playerSets, aiSets, currentSet;
+let ball, playerPaddle, aiPaddle;
+
+// Serve state
+let waitingServe = false;
+let server       = 'player'; // 'player' (P1/left) | 'ai' (P2/right)
+
+// AI
+let aiTarget = 0, aiDelayTimer = 0, aiOvershootOff = 0, aiVel = 0;
+
+const keys = {};
+
+// Networking
+let receivedP2Y = null;
+let pendingSnd  = null;
+
+// ─────────────────────────────────────────────
+//  AUDIO
+// ─────────────────────────────────────────────
+let _ac = null;
+function getAC() {
+  if (!_ac) _ac = new (window.AudioContext || window.webkitAudioContext)();
+  return _ac;
+}
+function beep(freq, dur, type = 'square', vol = 0.18) {
+  try {
+    const ac = getAC(), o = ac.createOscillator(), g = ac.createGain();
+    o.connect(g); g.connect(ac.destination);
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    o.start(); o.stop(ac.currentTime + dur);
+  } catch(e) {}
+}
+function playSnd(s) {
+  if (s === 'p')  beep(320, 0.07, 'square',   0.20);
+  if (s === 'w')  beep(200, 0.06, 'square',   0.12);
+  if (s === 'pt') { beep(180, 0.12, 'sawtooth', 0.22); setTimeout(() => beep(120, 0.18, 'sawtooth', 0.18), 100); }
+}
+function emitSnd(s) { playSnd(s); pendingSnd = s; }
+
+// ─────────────────────────────────────────────
+//  SIZE HELPERS
+// ─────────────────────────────────────────────
+function paddleH() { return Math.round(H * (PADDLE_H_FRAC + (W < SMALL_W ? PADDLE_H_BONUS : 0))); }
+function paddleW() { return Math.round(W * PADDLE_W_FRAC); }
+function ballSz()  { return Math.round(Math.min(W, H) * BALL_SIZE_FRAC); }
+function spdMult() { return Math.pow(1 + SPEED_PER_SET, currentSet) * (W < SMALL_W ? SMALL_SPD_MULT : 1); }
+
+// ─────────────────────────────────────────────
+//  RESIZE
+// ─────────────────────────────────────────────
+function resize() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  if (gameRunning) reposition();
+}
+function reposition() {
+  const ph = paddleH(), pw = paddleW();
+  playerPaddle.w = pw; playerPaddle.h = ph;
+  playerPaddle.x = Math.round(W * PADDLE_X_MARGIN);
+  playerPaddle.y = clamp(playerPaddle.y, 0, H - ph);
+  aiPaddle.w = pw; aiPaddle.h = ph;
+  aiPaddle.x = Math.round(W * (1 - PADDLE_X_MARGIN)) - pw;
+  aiPaddle.y = clamp(aiPaddle.y, 0, H - ph);
+  ball.size  = ballSz();
+  ball.x     = clamp(ball.x, 0, W - ball.size);
+  ball.y     = clamp(ball.y, 0, H - ball.size);
+}
+
+// ─────────────────────────────────────────────
+//  INIT
+// ─────────────────────────────────────────────
+function initScores() {
+  playerPoints = aiPoints = playerGames = aiGames = playerSets = aiSets = currentSet = 0;
+  waitingServe = false; server = 'player';
+}
+function initPaddles() {
+  const ph = paddleH(), pw = paddleW();
+  const lx = Math.round(W * PADDLE_X_MARGIN);
+  const rx = Math.round(W * (1 - PADDLE_X_MARGIN)) - pw;
+  playerPaddle = { x: lx, y: (H - ph) / 2, w: pw, h: ph };
+  aiPaddle     = { x: rx, y: (H - ph) / 2, w: pw, h: ph };
+  aiTarget = H / 2; aiDelayTimer = 0; aiOvershootOff = 0; aiVel = 0;
+  receivedP2Y = null;
+}
+function resetBall(dir) {
+  const bsz = ballSz();
+  ball = { x: (W - bsz) / 2, y: (H - bsz) / 2, size: bsz, vx: 0, vy: 0 };
+  const d   = (dir !== undefined) ? dir : (Math.random() < 0.5 ? 1 : -1);
+  const spd = BASE_BALL_SPD * H * spdMult();
+  const ang = Math.random() * 0.4 - 0.2;
+  ball.vx = d * spd * Math.cos(ang);
+  ball.vy = spd * Math.sin(ang);
+}
+
+// ─────────────────────────────────────────────
+//  MATCH START
+// ─────────────────────────────────────────────
+function start1P() { gameMode = '1p'; beginMatch(); }
+
+function beginMatch() {
+  UI.hideOverlay();
+  initScores();
+  initPaddles();
+  const bsz = ballSz();
+  ball = { x: 0, y: 0, size: bsz, vx: 0, vy: 0 };
+  server = 'player'; waitingServe = true;
+  placeBallOnPaddle(); // rest ball on P1 paddle immediately
+  lastTime = null; gameRunning = true;
+  if (raf) cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(loop);
+}
+
+// ─────────────────────────────────────────────
+//  SERVE
+// ─────────────────────────────────────────────
+// Place ball on the serving paddle (ball rests there until serve)
+function placeBallOnPaddle() {
+  const pad = server === 'player' ? playerPaddle : aiPaddle;
+  ball.size = ballSz();
+  ball.x = server === 'player' ? pad.x + pad.w : pad.x - ball.size;
+  ball.y = pad.y + (pad.h - ball.size) / 2;
+}
+
+function startRally(serveBy) {
+  ball.vx = 0; ball.vy = 0;
+  server = serveBy;
+  waitingServe = true;
+  placeBallOnPaddle();
+  // In 1P mode, AI auto-serves after a short delay
+  if (gameMode === '1p' && server === 'ai') {
+    setTimeout(() => { if (waitingServe && gameRunning) executeServe(); }, 1000);
+  }
+}
+
+function executeServe() {
+  waitingServe = false;
+  // Launch from current ball position (on paddle) — no repositioning
+  const dir = server === 'player' ? 1 : -1;
+  const spd = BASE_BALL_SPD * H * spdMult();
+  const ang = Math.random() * 0.4 - 0.2;
+  ball.vx = dir * spd * Math.cos(ang);
+  ball.vy = spd * Math.sin(ang);
+}
+
+function handleServeInput() {
+  if (!waitingServe || !gameRunning) return;
+  if (gameMode === '1p' && server === 'player')         { executeServe(); return; }
+  if (gameMode === '2p-host' && server === 'player')    { executeServe(); return; }
+  if (gameMode === '2p-guest' && server === 'ai') {
+    // 'ai' = P2 = guest from host perspective
+    if (Net.conn) Net.conn.send({ t: 'serve' });
+  }
+}
+
+// ─────────────────────────────────────────────
+//  GAME LOOP
+// ─────────────────────────────────────────────
+function loop(ts) {
+  if (!gameRunning) return;
+  if (lastTime === null) lastTime = ts;
+  const dt = Math.min((ts - lastTime) / 1000, 0.05);
+  lastTime = ts;
+  update(dt);
+  draw();
+  raf = requestAnimationFrame(loop);
+}
+
+// ─────────────────────────────────────────────
+//  UPDATE
+// ─────────────────────────────────────────────
+function update(dt) {
+  if (gameMode === '2p-guest') { updateGuestInput(dt); return; }
+
+  updatePlayerPaddle(dt);
+  if (gameMode === '2p-host') updateHostP2(); else updateAI(dt);
+  if (waitingServe) placeBallOnPaddle(); // ball follows the serving paddle
+  else              updateBall(dt);
+  if (gameMode === '2p-host') Net.sendState();
+}
+
+function updatePlayerPaddle(dt) {
+  const spd = BASE_PADDLE_SPD * H * spdMult();
+  if (keys['ArrowUp'])   playerPaddle.y -= spd * dt;
+  if (keys['ArrowDown']) playerPaddle.y += spd * dt;
+  playerPaddle.y = clamp(playerPaddle.y, 0, H - playerPaddle.h);
+}
+
+function updateHostP2() {
+  if (receivedP2Y !== null)
+    aiPaddle.y = clamp(receivedP2Y * H, 0, H - aiPaddle.h);
+}
+
+function updateGuestInput(dt) {
+  const spd = BASE_PADDLE_SPD * H * spdMult();
+  if (keys['ArrowUp'])   aiPaddle.y -= spd * dt;
+  if (keys['ArrowDown']) aiPaddle.y += spd * dt;
+  aiPaddle.y = clamp(aiPaddle.y, 0, H - aiPaddle.h);
+  if (Net.conn) Net.conn.send({ t: 'p', y: aiPaddle.y / H });
+}
+
+function updateAI(dt) {
+  const cfg    = AI_CFG[difficulty];
+  const maxSpd = BASE_PADDLE_SPD * H * spdMult();
+  if (aiDelayTimer > 0) { aiDelayTimer -= dt; }
+  else {
+    const bc       = ball.y + ball.size / 2;
+    aiOvershootOff = cfg.overshoot * H * (Math.random() > 0.5 ? 1 : -1) * Math.random();
+    aiTarget       = bc + aiOvershootOff;
+    aiDelayTimer   = cfg.delay * (0.6 + Math.random() * 0.8);
+  }
+  const diff       = aiTarget - (aiPaddle.y + aiPaddle.h / 2);
+  const deadZone   = H * 0.012; // ignore tiny deviations to avoid micro-jitter
+  const desiredVel = Math.abs(diff) < deadZone
+    ? 0
+    : Math.sign(diff) * Math.min(Math.abs(diff) * 4, maxSpd); // proportional, capped at max
+  // Smooth velocity changes so the paddle can't instantly reverse direction
+  const maxAccel = maxSpd * 3.5;
+  const dv = desiredVel - aiVel;
+  aiVel += Math.sign(dv) * Math.min(Math.abs(dv), maxAccel * dt);
+  aiPaddle.y += aiVel * dt;
+  aiPaddle.y = clamp(aiPaddle.y, 0, H - aiPaddle.h);
+}
+
+function updateBall(dt) {
+  ball.x += ball.vx * dt;
+  ball.y += ball.vy * dt;
+
+  if (ball.y <= 0) {
+    ball.y = 0; ball.vy = Math.abs(ball.vy); emitSnd('w');
+  } else if (ball.y + ball.size >= H) {
+    ball.y = H - ball.size; ball.vy = -Math.abs(ball.vy); emitSnd('w');
+  }
+
+  if (hitPaddle(playerPaddle, true))  return;
+  if (hitPaddle(aiPaddle,     false)) return;
+
+  if (ball.x + ball.size < 0) { emitSnd('pt'); awardPoint('ai');     return; }
+  if (ball.x > W)              { emitSnd('pt'); awardPoint('player'); return; }
+}
+
+function hitPaddle(pad, isLeft) {
+  if (isLeft  && ball.vx > 0) return false;
+  if (!isLeft && ball.vx < 0) return false;
+  if (ball.x < pad.x + pad.w && ball.x + ball.size > pad.x &&
+      ball.y < pad.y + pad.h && ball.y + ball.size > pad.y) {
+    ball.x = isLeft ? pad.x + pad.w : pad.x - ball.size;
+    const norm  = ((ball.y + ball.size / 2) - (pad.y + pad.h / 2)) / (pad.h / 2);
+    const angle = norm * (Math.PI / 3.5);
+    const spd   = Math.hypot(ball.vx, ball.vy);
+    ball.vx = (isLeft ? 1 : -1) * spd * Math.cos(angle);
+    ball.vy = spd * Math.sin(angle);
+    emitSnd('p');
+    return true;
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────
+//  SCORING
+// ─────────────────────────────────────────────
+function awardPoint(who) {
+  if (who === 'player') playerPoints++; else aiPoints++;
+  if (playerPoints >= 4 || aiPoints >= 4)
+    awardGame(playerPoints > aiPoints ? 'player' : 'ai');
+  else
+    startRally(who); // winner serves
+}
+function awardGame(who) {
+  if (who === 'player') playerGames++; else aiGames++;
+  playerPoints = aiPoints = 0;
+  const pWon = playerGames >= GAMES_TO_SET && playerGames > aiGames;
+  const aWon = aiGames >= GAMES_TO_SET     && aiGames > playerGames;
+  if      (pWon) awardSet('player');
+  else if (aWon) awardSet('ai');
+  else           startRally(who);
+}
+function awardSet(who) {
+  if (who === 'player') playerSets++; else aiSets++;
+  playerGames = aiGames = playerPoints = aiPoints = 0;
+  currentSet++;
+  if (playerSets >= SETS_TO_WIN || aiSets >= SETS_TO_WIN) endMatch(who);
+  else { initPaddles(); startRally(who); }
+}
+function endMatch(winner) {
+  gameRunning = false;
+  if (gameMode === '2p-host' && Net.conn) Net.conn.send({ t: 'end', w: winner });
+  UI.showEnd(winner);
+}
+
+// ─────────────────────────────────────────────
+//  REMATCH
+// ─────────────────────────────────────────────
+function doRematch() {
+  if (gameMode === '2p-guest') {
+    if (Net.conn) Net.conn.send({ t: 'rematch' });
+    document.getElementById('end-status').textContent = 'Czekam na hosta\u2026';
+    return;
+  }
+  if (gameMode === '2p-host' && Net.conn) Net.conn.send({ t: 'rematch-go' });
+  beginMatch();
+}
+
+// ─────────────────────────────────────────────
+//  DRAW
+// ─────────────────────────────────────────────
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  drawNet();
+  drawPaddle(playerPaddle);
+  drawPaddle(aiPaddle);
+  drawBallWaiting(); // always draw ball; blinks only during serve wait
+  drawHUD();
+}
+
+function drawNet() {
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth   = Math.max(1, Math.round(W * 0.003));
+  ctx.setLineDash([Math.round(H * 0.025), Math.round(H * 0.018)]);
+  ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.stroke();
+  ctx.restore();
+}
+function drawPaddle(p)  { ctx.fillStyle = '#fff'; ctx.fillRect(p.x, p.y, p.w, p.h); }
+function drawBall()     { ctx.fillStyle = '#fff'; ctx.fillRect(ball.x, ball.y, ball.size, ball.size); }
+function drawBallWaiting() {
+  // During serve wait: ball blinks on paddle. Otherwise: draw normally.
+  if (!waitingServe || Math.floor(Date.now() / 450) % 2 === 0) drawBall();
+}
+
+function drawHUD() {
+  const fs  = clamp(Math.round(H * 0.028), 12, 26);
+  const pad = Math.round(H * 0.018);
+  const qx  = W / 4;
+
+  const p1lbl = gameMode === '2p-guest' ? 'P1'   : 'TY';
+  const p2lbl = gameMode === '1p'       ? 'AI'
+              : gameMode === '2p-host'  ? 'GO\u015a\u0106' : 'TY';
+
+  ctx.textBaseline = 'top'; ctx.textAlign = 'center';
+
+  ctx.fillStyle = 'rgba(255,255,255,0.38)';
+  ctx.font = `${Math.round(fs * 0.72)}px 'Courier New', monospace`;
+  ctx.fillText(p1lbl, qx, pad);
+  ctx.fillText(p2lbl, W - qx, pad);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.90)';
+  ctx.font = `${fs}px 'Courier New', monospace`;
+  ctx.fillText(fmtScore(playerPoints, playerGames, playerSets), qx,     pad + fs * 0.85);
+  ctx.fillText(fmtScore(aiPoints,     aiGames,     aiSets),     W - qx, pad + fs * 0.85);
+}
+
+function fmtScore(pts, games, sets) {
+  const p = POINTS_SEQ[pts];
+  return `${p === 'G' ? '\u2014' : p}  |  ${games}  |  ${sets}`;
+}
+
+// ─────────────────────────────────────────────
+//  NETWORKING (PeerJS / WebRTC)
+// ─────────────────────────────────────────────
+const Net = {
+  peer: null,
+  conn: null,
+
+  initHost() {
+    Net.cleanup();
+    const code = Math.random().toString(36).substr(2, 6).toUpperCase();
+    document.getElementById('room-code').textContent   = code;
+    document.getElementById('host-status').textContent = 'Czekam na po\u0142\u0105czenie\u2026';
+    UI.showScreen('s-2p-host');
+    Net.peer = new Peer('vtennis-' + code);
+    Net.peer.on('error', e => {
+      document.getElementById('host-status').textContent = 'B\u0142\u0105d: ' + e.message;
+    });
+    Net.peer.on('connection', c => {
+      Net.conn = c;
+      document.getElementById('host-status').textContent = 'Po\u0142\u0105czono! Startujemy\u2026';
+      c.on('open', () => { gameMode = '2p-host'; setTimeout(() => beginMatch(), 600); });
+      c.on('data', d => {
+        if (d.t === 'p')       receivedP2Y = d.y;
+        if (d.t === 'serve')   executeServe();
+        if (d.t === 'rematch') doRematch();
+      });
+      c.on('close', () => { if (gameRunning) { gameRunning = false; UI.showMain(); } });
+    });
+  },
+
+  joinGame() {
+    const raw = (document.getElementById('code-input').value || '').trim().toUpperCase();
+    if (raw.length < 4) {
+      document.getElementById('guest-status').textContent = 'Podaj prawid\u0142owy kod.';
+      return;
+    }
+    Net.cleanup();
+    document.getElementById('guest-status').textContent = '\u0141\u0105czenie\u2026';
+    Net.peer = new Peer();
+    Net.peer.on('open', () => {
+      const c = Net.peer.connect('vtennis-' + raw, { reliable: false });
+      Net.conn = c;
+      c.on('open', () => {
+        document.getElementById('guest-status').textContent = 'Po\u0142\u0105czono!';
+        gameMode = '2p-guest';
+      });
+      c.on('data', d => Net.onGuestData(d));
+      c.on('close', () => { if (gameRunning) { gameRunning = false; UI.showMain(); } });
+      c.on('error', () => {
+        document.getElementById('guest-status').textContent = 'B\u0142\u0105d po\u0142\u0105czenia.';
+      });
+    });
+    Net.peer.on('error', e => {
+      document.getElementById('guest-status').textContent = 'B\u0142\u0105d: ' + e.message;
+    });
+  },
+
+  onGuestData(d) {
+    if (d.t === 'g') {
+      if (!gameRunning) {
+        initScores(); initPaddles();
+        ball = { x: d.bx * W, y: d.by * H, size: ballSz(), vx: 0, vy: 0 };
+        lastTime = null; gameRunning = true;
+        if (raf) cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(loop);
+        UI.hideOverlay();
+      }
+      ball.x = d.bx * W; ball.y = d.by * H; ball.size = ballSz();
+      playerPaddle.y  = d.p1y * H;
+      // aiPaddle = guest's own paddle — locally controlled, do NOT overwrite
+      playerPoints = d.pp; aiPoints = d.ap;
+      playerGames  = d.pg; aiGames  = d.ag;
+      playerSets   = d.ps; aiSets   = d.as;
+      currentSet   = d.cs;
+      waitingServe = !!d.ws;
+      server       = d.sv === 0 ? 'player' : 'ai';
+      if (d.snd) playSnd(d.snd);
+    }
+    if (d.t === 'end') {
+      gameRunning = false;
+      UI.showEnd(d.w === 'player' ? 'ai' : 'player');
+    }
+    if (d.t === 'rematch-go') {
+      initScores(); initPaddles();
+      ball = { x: 0, y: 0, size: ballSz(), vx: 0, vy: 0 };
+      server = 'player'; waitingServe = true;
+      placeBallOnPaddle();
+      lastTime = null; gameRunning = true;
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(loop);
+      UI.hideOverlay();
+    }
+  },
+
+  sendState() {
+    if (!Net.conn || !Net.conn.open) return;
+    Net.conn.send({
+      t: 'g',
+      bx: ball.x / W,          by: ball.y / H,
+      p1y: playerPaddle.y / H, p2y: aiPaddle.y / H,
+      pp: playerPoints, ap: aiPoints,
+      pg: playerGames,  ag: aiGames,
+      ps: playerSets,   as: aiSets,
+      cs: currentSet,
+      ws: waitingServe ? 1 : 0,
+      sv: server === 'player' ? 0 : 1,
+      snd: pendingSnd,
+    });
+    pendingSnd = null;
+  },
+
+  cancel() {
+    gameRunning = false; receivedP2Y = null; pendingSnd = null; gameMode = '1p';
+    if (Net.conn) { try { Net.conn.close(); } catch(e) {} Net.conn = null; }
+    if (Net.peer) { try { Net.peer.destroy(); } catch(e) {} Net.peer = null; }
+  },
+  cleanup() { Net.cancel(); },
+};
+
+// ─────────────────────────────────────────────
+//  UI
+// ─────────────────────────────────────────────
+const UI = {
+  showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    document.getElementById('overlay').classList.remove('hidden');
+  },
+  hideOverlay() { document.getElementById('overlay').classList.add('hidden'); },
+  showMain() {
+    menuSelectMode(menuMode);
+    UI.showScreen('s-menu');
+  },
+  show2PGuest() {
+    document.getElementById('guest-status').textContent = '';
+    document.getElementById('code-input').value = '';
+    UI.showScreen('s-2p-guest');
+  },
+  showEnd(winner) {
+    document.getElementById('end-title').textContent =
+      winner === 'player' ? '\uD83C\uDFC6 Wygra\u0142e\u015b!' : 'Przegra\u0142e\u015b';
+    const modeStr = gameMode === '1p' ? `<br>Poziom: ${diffLabel(difficulty)}` : '';
+    document.getElementById('end-result').innerHTML =
+      `Wynik: <strong>${playerSets}</strong>\u00a0:\u00a0<strong>${aiSets}</strong> (sety)${modeStr}`;
+    document.getElementById('end-status').textContent = '';
+    document.getElementById('btn-rematch').textContent =
+      gameMode === '2p-guest' ? '\u25BA Popro\u015b o rewan\u017c' : '\u25BA Zagraj ponownie';
+    UI.showScreen('s-end');
+  },
+};
+
+// ─────────────────────────────────────────────
+//  MENU MODE + DIFFICULTY
+// ─────────────────────────────────────────────
+function menuSelectMode(m) {
+  menuMode = m;
+  document.getElementById('sec-1p').style.display = m === '1p' ? '' : 'none';
+  document.getElementById('sec-2p').style.display = m === '2p' ? '' : 'none';
+  document.getElementById('btn-m1p').classList.toggle('sel', m === '1p');
+  document.getElementById('btn-m2p').classList.toggle('sel', m === '2p');
+}
+function selectDiff(d)  { difficulty = d; updateDiffBtns(); }
+function updateDiffBtns() {
+  ['easy','medium','hard'].forEach(d =>
+    document.getElementById('btn-' + d).classList.toggle('sel', d === difficulty));
+}
+function diffLabel(d) { return { easy:'\u0141atwy', medium:'\u015arednio', hard:'Trudny' }[d]; }
+
+// ─────────────────────────────────────────────
+//  INPUT
+// ─────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (['ArrowUp','ArrowDown'].includes(e.key)) e.preventDefault();
+  if (e.key === ' ' && gameRunning) { e.preventDefault(); handleServeInput(); }
+});
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+canvas.addEventListener('click', () => { if (gameRunning) handleServeInput(); });
+
+window.addEventListener('mousemove', e => {
+  if (!gameRunning) return;
+  const pad = gameMode === '2p-guest' ? aiPaddle : playerPaddle;
+  pad.y = clamp(e.clientY - pad.h / 2, 0, H - pad.h);
+  if (gameMode === '2p-guest' && Net.conn) Net.conn.send({ t: 'p', y: pad.y / H });
+});
+
+let _ty0 = null, _py0 = null, _touchMoved = false;
+window.addEventListener('touchstart', e => {
+  if (!gameRunning) return;
+  _touchMoved = false;
+  _ty0 = e.touches[0].clientY;
+  _py0 = (gameMode === '2p-guest' ? aiPaddle : playerPaddle).y;
+}, { passive: true });
+window.addEventListener('touchmove', e => {
+  if (!gameRunning || _ty0 === null) return;
+  _touchMoved = true;
+  const pad = gameMode === '2p-guest' ? aiPaddle : playerPaddle;
+  pad.y = clamp(_py0 + e.touches[0].clientY - _ty0, 0, H - pad.h);
+  if (gameMode === '2p-guest' && Net.conn) Net.conn.send({ t: 'p', y: pad.y / H });
+}, { passive: true });
+window.addEventListener('touchend', () => {
+  if (!_touchMoved && gameRunning) handleServeInput(); // tap = serve
+  _ty0 = null;
+}, { passive: true });
+
+// ─────────────────────────────────────────────
+//  UTILS
+// ─────────────────────────────────────────────
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+// ─────────────────────────────────────────────
+//  BOOT
+// ─────────────────────────────────────────────
+window.addEventListener('resize', resize);
+resize();
+updateDiffBtns();
+menuSelectMode('1p');
+</script>
+</body>
+</html>
