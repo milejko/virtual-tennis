@@ -126,7 +126,9 @@
   <div id="s-2p-host" class="screen">
     <h2>Tw&#243;j kod gry</h2>
     <div id="room-code" class="code-box">&#183;&#183;&#183;</div>
-    <p>Podaj ten kod drugiemu graczowi</p>
+    <canvas id="qr-canvas" style="display:none; margin:0 auto; border-radius:6px;"></canvas>
+    <p id="qr-hint" style="display:none">Zeskanuj, by do&#322;&#261;czy&#263; bezpo&#347;rednio</p>
+    <p>lub podaj kod drugiemu graczowi</p>
     <div class="status" id="host-status">Czekam na po&#322;&#261;czenie&#8230;</div>
     <button class="ghost" onclick="Net.cancel(); UI.showMain()">&#8592; Anuluj</button>
   </div>
@@ -158,6 +160,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 <script>
 'use strict';
 
@@ -167,17 +170,14 @@
 const POINTS_SEQ    = [0, 15, 30, 40, 'G'];
 const GAMES_TO_SET  = 4;
 const SETS_TO_WIN   = 2;
-const SPEED_PER_SET = 0.10;
+const SPEED_PER_BALL = 0.015;   // +1.5% per point scored
 
-const BASE_BALL_SPD   = 0.55;
+const BASE_BALL_SPD   = 0.605;  // 0.55 * 1.10 — start 10% faster
 const BASE_PADDLE_SPD = 0.80;
 const PADDLE_W_FRAC   = 0.012;
 const PADDLE_H_FRAC   = 0.14;
-const PADDLE_H_BONUS  = 0.06;
 const PADDLE_X_MARGIN = 0.04;
 const BALL_SIZE_FRAC  = 0.018;
-const SMALL_W         = 500;
-const SMALL_SPD_MULT  = 0.82;
 
 const AI_CFG = {
   easy:   { delay: 0.55, overshoot: 0.28 },
@@ -199,7 +199,7 @@ let gameRunning = false;
 let raf         = null;
 let lastTime    = null;
 
-let playerPoints, aiPoints, playerGames, aiGames, playerSets, aiSets, currentSet;
+let playerPoints, aiPoints, playerGames, aiGames, playerSets, aiSets, currentSet, ballsPlayed;
 let ball, playerPaddle, aiPaddle;
 
 // Serve state
@@ -243,10 +243,10 @@ function emitSnd(s) { playSnd(s); pendingSnd = s; }
 // ─────────────────────────────────────────────
 //  SIZE HELPERS
 // ─────────────────────────────────────────────
-function paddleH() { return Math.round(H * (PADDLE_H_FRAC + (W < SMALL_W ? PADDLE_H_BONUS : 0))); }
+function paddleH() { return Math.round(H * PADDLE_H_FRAC); }
 function paddleW() { return Math.round(W * PADDLE_W_FRAC); }
 function ballSz()  { return Math.round(Math.min(W, H) * BALL_SIZE_FRAC); }
-function spdMult() { return Math.pow(1 + SPEED_PER_SET, currentSet) * (W < SMALL_W ? SMALL_SPD_MULT : 1); }
+function spdMult() { return Math.pow(1 + SPEED_PER_BALL, ballsPlayed || 0); }
 
 // ─────────────────────────────────────────────
 //  RESIZE
@@ -273,7 +273,7 @@ function reposition() {
 //  INIT
 // ─────────────────────────────────────────────
 function initScores() {
-  playerPoints = aiPoints = playerGames = aiGames = playerSets = aiSets = currentSet = 0;
+  playerPoints = aiPoints = playerGames = aiGames = playerSets = aiSets = currentSet = ballsPlayed = 0;
   waitingServe = false; server = 'player';
 }
 function initPaddles() {
@@ -462,6 +462,7 @@ function hitPaddle(pad, isLeft) {
 //  SCORING
 // ─────────────────────────────────────────────
 function awardPoint(who) {
+  ballsPlayed++;
   if (who === 'player') playerPoints++; else aiPoints++;
   if (playerPoints >= 4 || aiPoints >= 4)
     awardGame(playerPoints > aiPoints ? 'player' : 'ai');
@@ -570,6 +571,15 @@ const Net = {
     document.getElementById('room-code').textContent   = code;
     document.getElementById('host-status').textContent = 'Czekam na po\u0142\u0105czenie\u2026';
     UI.showScreen('s-2p-host');
+    // Generate QR code pointing directly to guest join URL
+    const joinUrl = `${location.origin}${location.pathname}?join=${code}`;
+    const qrCanvas = document.getElementById('qr-canvas');
+    QRCode.toCanvas(qrCanvas, joinUrl, { width: 160, margin: 1, color: { dark: '#ffffff', light: '#000000' } }, err => {
+      if (!err) {
+        qrCanvas.style.display = 'block';
+        document.getElementById('qr-hint').style.display = '';
+      }
+    });
     Net.peer = new Peer('vtennis-' + code);
     Net.peer.on('error', e => {
       document.getElementById('host-status').textContent = 'B\u0142\u0105d: ' + e.message;
@@ -631,6 +641,7 @@ const Net = {
       playerGames  = d.pg; aiGames  = d.ag;
       playerSets   = d.ps; aiSets   = d.as;
       currentSet   = d.cs;
+      ballsPlayed  = d.bp || 0;
       waitingServe = !!d.ws;
       server       = d.sv === 0 ? 'player' : 'ai';
       if (d.snd) playSnd(d.snd);
@@ -661,6 +672,7 @@ const Net = {
       pg: playerGames,  ag: aiGames,
       ps: playerSets,   as: aiSets,
       cs: currentSet,
+      bp: ballsPlayed,
       ws: waitingServe ? 1 : 0,
       sv: server === 'player' ? 0 : 1,
       snd: pendingSnd,
@@ -790,6 +802,15 @@ window.addEventListener('resize', resize);
 resize();
 updateDiffBtns();
 menuSelectMode('1p');
+
+// Auto-join if URL contains ?join=CODE (e.g. from QR scan)
+const _autoJoin = new URLSearchParams(location.search).get('join');
+if (_autoJoin) {
+  menuSelectMode('2p');
+  document.getElementById('code-input').value = _autoJoin.toUpperCase();
+  UI.show2PGuest();
+  Net.joinGame();
+}
 </script>
 </body>
 </html>
