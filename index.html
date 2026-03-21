@@ -9,7 +9,7 @@
     html, body {
       width: 100%; height: 100%;
       background: #000; overflow: hidden;
-      font-family: 'Courier New', Courier, monospace;
+      font-family: monospace;
       color: #fff; touch-action: none;
     }
     canvas { display: block; }
@@ -37,14 +37,14 @@
     p { font-size: clamp(0.75rem, 2.2vw, 1rem); opacity: 0.6; }
     .result { font-size: clamp(0.9rem, 2.5vw, 1.2rem); line-height: 1.9; }
     .btn-col { display: flex; flex-direction: column; align-items: center; gap: 1.2vh; width: 100%; }
-    .btn-row { display: flex; flex-direction: row; gap: 2vw; flex-wrap: wrap; justify-content: center; }
+    .btn-row { display: flex; flex-direction: row; gap: 2vw; flex-wrap: nowrap; justify-content: center; }
     button {
       background: transparent;
       border: 1px solid rgba(255,255,255,0.45);
       color: #fff; font-family: inherit;
       font-size: clamp(0.8rem, 2.4vw, 1.05rem);
       letter-spacing: 0.1em; text-transform: uppercase;
-      padding: 0.65em 1.8em; cursor: pointer; min-width: 9em;
+      padding: 0.65em 1.4em; cursor: pointer; min-width: 0; white-space: nowrap;
       transition: background 0.15s, border-color 0.15s;
     }
     button:hover, button.sel {
@@ -53,6 +53,10 @@
     button.primary { border-color: rgba(255,255,255,0.75); font-size: clamp(0.9rem, 2.8vw, 1.2rem); }
     button.ghost   { opacity: 0.45; font-size: clamp(0.7rem, 2vw, 0.88rem); }
     .sep { width: 60%; border: none; border-top: 1px solid rgba(255,255,255,0.15); margin: 0.4vh 0; }
+    .menu-section {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 1.4vh; width: 100%;
+    }
     .code-box {
       font-size: clamp(2rem, 9vw, 4rem);
       letter-spacing: 0.3em; padding: 0.25em 0.6em;
@@ -101,24 +105,32 @@
   <!-- SINGLE MENU SCREEN -->
   <div id="s-menu" class="screen active">
     <h1>Virtual<br>Tennis</h1>
-    <div class="btn-row" style="margin-top:0.5vh">
+
+    <!-- Mode selector — inline -->
+    <div class="btn-row">
       <button id="btn-m1p" class="sel" onclick="menuSelectMode('1p')">1 Gracz</button>
       <button id="btn-m2p"            onclick="menuSelectMode('2p')">2 Graczy</button>
     </div>
+
     <hr class="sep" />
+
     <!-- 1P section -->
-    <div id="sec-1p" class="btn-col">
+    <div id="sec-1p" class="menu-section">
       <div class="btn-row">
         <button id="btn-easy"   onclick="selectDiff('easy')">&#321;atwy</button>
         <button id="btn-medium" onclick="selectDiff('medium')" class="sel">&#346;redni</button>
         <button id="btn-hard"   onclick="selectDiff('hard')">Trudny</button>
       </div>
-      <button class="primary" style="margin-top:0.5vh" onclick="start1P()">&#9654; Start</button>
+      <hr class="sep" />
+      <button class="primary" onclick="start1P()">&#9654; Start</button>
     </div>
+
     <!-- 2P section -->
-    <div id="sec-2p" class="btn-col" style="display:none">
-      <button class="primary" onclick="Net.initHost()">&#128187; Utw&#243;rz gr&#281;</button>
-      <button class="primary" onclick="UI.show2PGuest()">&#128241; Do&#322;&#261;cz do gry</button>
+    <div id="sec-2p" class="menu-section" style="display:none">
+      <div class="btn-row">
+        <button onclick="Net.initHost()">&#128187; Utw&#243;rz gr&#281;</button>
+        <button onclick="UI.show2PGuest()">&#128241; Do&#322;&#261;cz</button>
+      </div>
     </div>
   </div>
 
@@ -126,7 +138,7 @@
   <div id="s-2p-host" class="screen">
     <h2>Tw&#243;j kod gry</h2>
     <div id="room-code" class="code-box">&#183;&#183;&#183;</div>
-    <canvas id="qr-canvas" style="display:none; margin:0 auto; border-radius:6px;"></canvas>
+    <img id="qr-img" src="" alt="QR kod" style="display:none; margin:0 auto; border-radius:6px; width:160px; height:160px;" />
     <p id="qr-hint" style="display:none">Zeskanuj, by do&#322;&#261;czy&#263; bezpo&#347;rednio</p>
     <p>lub podaj kod drugiemu graczowi</p>
     <div class="status" id="host-status">Czekam na po&#322;&#261;czenie&#8230;</div>
@@ -160,17 +172,15 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 <script>
 'use strict';
 
 // ─────────────────────────────────────────────
 //  CONSTANTS
 // ─────────────────────────────────────────────
-const POINTS_SEQ    = [0, 15, 30, 40, 'G'];
-const GAMES_TO_SET  = 4;
-const SETS_TO_WIN   = 2;
-const SPEED_PER_BALL = 0.015;   // +1.5% per point scored
+const POINTS_TO_WIN  = 21;
+const SPEED_PER_BALL = 0.025;   // +2.5% per point scored
 
 const BASE_BALL_SPD   = 0.605;  // 0.55 * 1.10 — start 10% faster
 const BASE_PADDLE_SPD = 0.80;
@@ -199,7 +209,7 @@ let gameRunning = false;
 let raf         = null;
 let lastTime    = null;
 
-let playerPoints, aiPoints, playerGames, aiGames, playerSets, aiSets, currentSet, ballsPlayed;
+let playerPoints, aiPoints, ballsPlayed;
 let ball, playerPaddle, aiPaddle;
 
 // Serve state
@@ -273,7 +283,7 @@ function reposition() {
 //  INIT
 // ─────────────────────────────────────────────
 function initScores() {
-  playerPoints = aiPoints = playerGames = aiGames = playerSets = aiSets = currentSet = ballsPlayed = 0;
+  playerPoints = aiPoints = ballsPlayed = 0;
   waitingServe = false; server = 'player';
 }
 function initPaddles() {
@@ -306,7 +316,7 @@ function beginMatch() {
   initPaddles();
   const bsz = ballSz();
   ball = { x: 0, y: 0, size: bsz, vx: 0, vy: 0 };
-  server = 'player'; waitingServe = true;
+  server = nextServer(); waitingServe = true;
   placeBallOnPaddle(); // rest ball on P1 paddle immediately
   lastTime = null; gameRunning = true;
   if (raf) cancelAnimationFrame(raf);
@@ -324,9 +334,9 @@ function placeBallOnPaddle() {
   ball.y = pad.y + (pad.h - ball.size) / 2;
 }
 
-function startRally(serveBy) {
+function startRally() {
   ball.vx = 0; ball.vy = 0;
-  server = serveBy;
+  server = nextServer();
   waitingServe = true;
   placeBallOnPaddle();
   // In 1P mode, AI auto-serves after a short delay
@@ -461,29 +471,19 @@ function hitPaddle(pad, isLeft) {
 // ─────────────────────────────────────────────
 //  SCORING
 // ─────────────────────────────────────────────
+function nextServer() {
+  // Deuce (20:20+): alternate every point; otherwise every 2 points
+  const atDeuce = playerPoints >= POINTS_TO_WIN - 1 && aiPoints >= POINTS_TO_WIN - 1;
+  return (Math.floor(ballsPlayed / (atDeuce ? 1 : 2)) % 2 === 0) ? 'player' : 'ai';
+}
+
 function awardPoint(who) {
   ballsPlayed++;
   if (who === 'player') playerPoints++; else aiPoints++;
-  if (playerPoints >= 4 || aiPoints >= 4)
-    awardGame(playerPoints > aiPoints ? 'player' : 'ai');
-  else
-    startRally(who); // winner serves
-}
-function awardGame(who) {
-  if (who === 'player') playerGames++; else aiGames++;
-  playerPoints = aiPoints = 0;
-  const pWon = playerGames >= GAMES_TO_SET && playerGames > aiGames;
-  const aWon = aiGames >= GAMES_TO_SET     && aiGames > playerGames;
-  if      (pWon) awardSet('player');
-  else if (aWon) awardSet('ai');
-  else           startRally(who);
-}
-function awardSet(who) {
-  if (who === 'player') playerSets++; else aiSets++;
-  playerGames = aiGames = playerPoints = aiPoints = 0;
-  currentSet++;
-  if (playerSets >= SETS_TO_WIN || aiSets >= SETS_TO_WIN) endMatch(who);
-  else { initPaddles(); startRally(who); }
+  const pWon = playerPoints >= POINTS_TO_WIN && playerPoints - aiPoints >= 2;
+  const aWon = aiPoints    >= POINTS_TO_WIN && aiPoints - playerPoints >= 2;
+  if (pWon || aWon) endMatch(pWon ? 'player' : 'ai');
+  else              startRally();
 }
 function endMatch(winner) {
   gameRunning = false;
@@ -532,30 +532,23 @@ function drawBallWaiting() {
 }
 
 function drawHUD() {
-  const fs  = clamp(Math.round(H * 0.028), 12, 26);
+  const fs  = clamp(Math.round(H * 0.062), 26, 56);
   const pad = Math.round(H * 0.018);
   const qx  = W / 4;
 
-  const p1lbl = gameMode === '2p-guest' ? 'P1'   : 'TY';
-  const p2lbl = gameMode === '1p'       ? 'AI'
-              : gameMode === '2p-host'  ? 'GO\u015a\u0106' : 'TY';
-
   ctx.textBaseline = 'top'; ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.font = `bold ${fs}px monospace`;
+  ctx.fillText(playerPoints, qx,     pad);
+  ctx.fillText(aiPoints,     W - qx, pad);
 
-  ctx.fillStyle = 'rgba(255,255,255,0.38)';
-  ctx.font = `${Math.round(fs * 0.72)}px 'Courier New', monospace`;
-  ctx.fillText(p1lbl, qx, pad);
-  ctx.fillText(p2lbl, W - qx, pad);
-
-  ctx.fillStyle = 'rgba(255,255,255,0.90)';
-  ctx.font = `${fs}px 'Courier New', monospace`;
-  ctx.fillText(fmtScore(playerPoints, playerGames, playerSets), qx,     pad + fs * 0.85);
-  ctx.fillText(fmtScore(aiPoints,     aiGames,     aiSets),     W - qx, pad + fs * 0.85);
-}
-
-function fmtScore(pts, games, sets) {
-  const p = POINTS_SEQ[pts];
-  return `${p === 'G' ? '\u2014' : p}  |  ${games}  |  ${sets}`;
+  // Deuce indicator
+  const atDeuce = playerPoints >= POINTS_TO_WIN - 1 && aiPoints >= POINTS_TO_WIN - 1;
+  if (atDeuce) {
+    ctx.fillStyle = 'rgba(255,220,50,0.80)';
+    ctx.font = `${Math.round(fs * 0.38)}px monospace`;
+    ctx.fillText('DEUCE', W / 2, pad + fs * 0.3);
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -573,10 +566,11 @@ const Net = {
     UI.showScreen('s-2p-host');
     // Generate QR code pointing directly to guest join URL
     const joinUrl = `${location.origin}${location.pathname}?join=${code}`;
-    const qrCanvas = document.getElementById('qr-canvas');
-    QRCode.toCanvas(qrCanvas, joinUrl, { width: 160, margin: 1, color: { dark: '#ffffff', light: '#000000' } }, err => {
+    const qrImg = document.getElementById('qr-img');
+    QRCode.toDataURL(joinUrl, { width: 160, margin: 1, color: { dark: '#ffffff', light: '#000000' } }, (err, url) => {
       if (!err) {
-        qrCanvas.style.display = 'block';
+        qrImg.src = url;
+        qrImg.style.display = 'block';
         document.getElementById('qr-hint').style.display = '';
       }
     });
@@ -638,9 +632,6 @@ const Net = {
       playerPaddle.y  = d.p1y * H;
       // aiPaddle = guest's own paddle — locally controlled, do NOT overwrite
       playerPoints = d.pp; aiPoints = d.ap;
-      playerGames  = d.pg; aiGames  = d.ag;
-      playerSets   = d.ps; aiSets   = d.as;
-      currentSet   = d.cs;
       ballsPlayed  = d.bp || 0;
       waitingServe = !!d.ws;
       server       = d.sv === 0 ? 'player' : 'ai';
@@ -653,7 +644,7 @@ const Net = {
     if (d.t === 'rematch-go') {
       initScores(); initPaddles();
       ball = { x: 0, y: 0, size: ballSz(), vx: 0, vy: 0 };
-      server = 'player'; waitingServe = true;
+      server = nextServer(); waitingServe = true;
       placeBallOnPaddle();
       lastTime = null; gameRunning = true;
       if (raf) cancelAnimationFrame(raf);
@@ -669,9 +660,6 @@ const Net = {
       bx: ball.x / W,          by: ball.y / H,
       p1y: playerPaddle.y / H, p2y: aiPaddle.y / H,
       pp: playerPoints, ap: aiPoints,
-      pg: playerGames,  ag: aiGames,
-      ps: playerSets,   as: aiSets,
-      cs: currentSet,
       bp: ballsPlayed,
       ws: waitingServe ? 1 : 0,
       sv: server === 'player' ? 0 : 1,
@@ -712,7 +700,7 @@ const UI = {
       winner === 'player' ? '\uD83C\uDFC6 Wygra\u0142e\u015b!' : 'Przegra\u0142e\u015b';
     const modeStr = gameMode === '1p' ? `<br>Poziom: ${diffLabel(difficulty)}` : '';
     document.getElementById('end-result').innerHTML =
-      `Wynik: <strong>${playerSets}</strong>\u00a0:\u00a0<strong>${aiSets}</strong> (sety)${modeStr}`;
+      `Wynik: <strong>${playerPoints}</strong>\u00a0:\u00a0<strong>${aiPoints}</strong>${modeStr}`;
     document.getElementById('end-status').textContent = '';
     document.getElementById('btn-rematch').textContent =
       gameMode === '2p-guest' ? '\u25BA Popro\u015b o rewan\u017c' : '\u25BA Zagraj ponownie';
