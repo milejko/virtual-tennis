@@ -180,7 +180,7 @@
 //  CONSTANTS
 // ─────────────────────────────────────────────
 const POINTS_TO_WIN  = 21;
-const SPEED_PER_BALL = 0.025;   // +2.5% per point scored
+const RALLY_SPD_MULT = 1.05;    // +5% speed per paddle hit, resets each point
 
 const BASE_BALL_SPD   = 0.605;  // 0.55 * 1.10 — start 10% faster
 const BASE_PADDLE_SPD = 0.80;
@@ -209,7 +209,7 @@ let gameRunning = false;
 let raf         = null;
 let lastTime    = null;
 
-let playerPoints, aiPoints, ballsPlayed;
+let playerPoints, aiPoints, ballsPlayed, rallyHits, pointBaseMult;
 let ball, playerPaddle, aiPaddle;
 
 // Serve state
@@ -256,7 +256,7 @@ function emitSnd(s) { playSnd(s); pendingSnd = s; }
 function paddleH() { return Math.round(H * PADDLE_H_FRAC); }
 function paddleW() { return Math.round(W * PADDLE_W_FRAC); }
 function ballSz()  { return Math.round(Math.min(W, H) * BALL_SIZE_FRAC); }
-function spdMult() { return Math.pow(1 + SPEED_PER_BALL, ballsPlayed || 0); }
+function spdMult() { return pointBaseMult; }
 
 // ─────────────────────────────────────────────
 //  RESIZE
@@ -283,7 +283,8 @@ function reposition() {
 //  INIT
 // ─────────────────────────────────────────────
 function initScores() {
-  playerPoints = aiPoints = ballsPlayed = 0;
+  playerPoints = aiPoints = ballsPlayed = rallyHits = 0;
+  pointBaseMult = 1;
   waitingServe = false; server = 'player';
 }
 function initPaddles() {
@@ -308,7 +309,7 @@ function resetBall(dir) {
 // ─────────────────────────────────────────────
 //  MATCH START
 // ─────────────────────────────────────────────
-function start1P() { gameMode = '1p'; beginMatch(); }
+function start1P() { enterFullscreen(); gameMode = '1p'; beginMatch(); }
 
 function beginMatch() {
   UI.hideOverlay();
@@ -316,7 +317,7 @@ function beginMatch() {
   initPaddles();
   const bsz = ballSz();
   ball = { x: 0, y: 0, size: bsz, vx: 0, vy: 0 };
-  server = nextServer(); waitingServe = true;
+  server = 'player'; waitingServe = true;
   placeBallOnPaddle(); // rest ball on P1 paddle immediately
   lastTime = null; gameRunning = true;
   if (raf) cancelAnimationFrame(raf);
@@ -334,9 +335,10 @@ function placeBallOnPaddle() {
   ball.y = pad.y + (pad.h - ball.size) / 2;
 }
 
-function startRally() {
+function startRally(who) {
   ball.vx = 0; ball.vy = 0;
-  server = nextServer();
+  rallyHits = 0;
+  server = who;
   waitingServe = true;
   placeBallOnPaddle();
   // In 1P mode, AI auto-serves after a short delay
@@ -459,7 +461,8 @@ function hitPaddle(pad, isLeft) {
     ball.x = isLeft ? pad.x + pad.w : pad.x - ball.size;
     const norm  = ((ball.y + ball.size / 2) - (pad.y + pad.h / 2)) / (pad.h / 2);
     const angle = norm * (Math.PI / 3.5);
-    const spd   = Math.hypot(ball.vx, ball.vy);
+    const spd   = Math.hypot(ball.vx, ball.vy) * RALLY_SPD_MULT;
+    rallyHits++;
     ball.vx = (isLeft ? 1 : -1) * spd * Math.cos(angle);
     ball.vy = spd * Math.sin(angle);
     emitSnd('p');
@@ -471,19 +474,13 @@ function hitPaddle(pad, isLeft) {
 // ─────────────────────────────────────────────
 //  SCORING
 // ─────────────────────────────────────────────
-function nextServer() {
-  // Deuce (20:20+): alternate every point; otherwise every 2 points
-  const atDeuce = playerPoints >= POINTS_TO_WIN - 1 && aiPoints >= POINTS_TO_WIN - 1;
-  return (Math.floor(ballsPlayed / (atDeuce ? 1 : 2)) % 2 === 0) ? 'player' : 'ai';
-}
-
 function awardPoint(who) {
   ballsPlayed++;
   if (who === 'player') playerPoints++; else aiPoints++;
   const pWon = playerPoints >= POINTS_TO_WIN && playerPoints - aiPoints >= 2;
   const aWon = aiPoints    >= POINTS_TO_WIN && aiPoints - playerPoints >= 2;
   if (pWon || aWon) endMatch(pWon ? 'player' : 'ai');
-  else              startRally();
+  else { pointBaseMult *= 1.05; startRally(who); }
 }
 function endMatch(winner) {
   gameRunning = false;
@@ -559,6 +556,7 @@ const Net = {
   conn: null,
 
   initHost() {
+    enterFullscreen();
     Net.cleanup();
     const code = Math.random().toString(36).substr(2, 6).toUpperCase();
     document.getElementById('room-code').textContent   = code;
@@ -597,6 +595,7 @@ const Net = {
       document.getElementById('guest-status').textContent = 'Podaj prawid\u0142owy kod.';
       return;
     }
+    enterFullscreen();
     Net.cleanup();
     document.getElementById('guest-status').textContent = '\u0141\u0105czenie\u2026';
     Net.peer = new Peer();
@@ -633,6 +632,7 @@ const Net = {
       // aiPaddle = guest's own paddle — locally controlled, do NOT overwrite
       playerPoints = d.pp; aiPoints = d.ap;
       ballsPlayed  = d.bp || 0;
+      pointBaseMult = d.pm || 1;
       waitingServe = !!d.ws;
       server       = d.sv === 0 ? 'player' : 'ai';
       if (d.snd) playSnd(d.snd);
@@ -644,7 +644,7 @@ const Net = {
     if (d.t === 'rematch-go') {
       initScores(); initPaddles();
       ball = { x: 0, y: 0, size: ballSz(), vx: 0, vy: 0 };
-      server = nextServer(); waitingServe = true;
+      server = 'player'; waitingServe = true;
       placeBallOnPaddle();
       lastTime = null; gameRunning = true;
       if (raf) cancelAnimationFrame(raf);
@@ -660,7 +660,7 @@ const Net = {
       bx: ball.x / W,          by: ball.y / H,
       p1y: playerPaddle.y / H, p2y: aiPaddle.y / H,
       pp: playerPoints, ap: aiPoints,
-      bp: ballsPlayed,
+      bp: ballsPlayed,  pm: pointBaseMult,
       ws: waitingServe ? 1 : 0,
       sv: server === 'player' ? 0 : 1,
       snd: pendingSnd,
@@ -782,6 +782,20 @@ function checkOrientation() {
 window.addEventListener('orientationchange', checkOrientation);
 window.matchMedia('(orientation: portrait)').addEventListener('change', checkOrientation);
 checkOrientation();
+
+// ─────────────────────────────────────────────
+//  FULLSCREEN + ORIENTATION LOCK
+// ─────────────────────────────────────────────
+function enterFullscreen() {
+  const el = document.documentElement;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+  if (req) req.call(el).then(() => {
+    // Lock orientation to landscape once in fullscreen (Android Chrome / modern browsers)
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock('landscape').catch(() => {});
+    }
+  }).catch(() => {});
+}
 
 // ─────────────────────────────────────────────
 //  BOOT
