@@ -795,8 +795,8 @@ menuSelectMode('1p');
 const _autoJoin = new URLSearchParams(location.search).get('join');
 if (_autoJoin) {
   menuSelectMode('2p');
-  document.getElementById('code-input').value = _autoJoin.toUpperCase();
-  UI.show2PGuest();
+  UI.show2PGuest();                                           // clears input — must be first
+  document.getElementById('code-input').value = _autoJoin.toUpperCase();  // set after
   Net.joinGame();
 }
 </script>
