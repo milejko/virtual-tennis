@@ -190,9 +190,10 @@ const PADDLE_X_MARGIN = 0.04;
 const BALL_SIZE_FRAC  = 0.018;
 
 const AI_CFG = {
-  easy:   { delay: 0.55, overshoot: 0.28 },
-  medium: { delay: 0.18, overshoot: 0.10 },
-  hard:   { delay: 0,    overshoot: 0    },
+  //               errorMag: max error as fraction of H   errorInterval: s between errors   lerpFactor: tracking speed
+  easy:   { errorMag: 0.22, errorInterval: 0.55, lerpFactor: 6  },
+  medium: { errorMag: 0.08, errorInterval: 1.00, lerpFactor: 12 },
+  hard:   { errorMag: 0,    errorInterval: Infinity, lerpFactor: 22 },
 };
 
 // ─────────────────────────────────────────────
@@ -217,7 +218,7 @@ let waitingServe = false;
 let server       = 'player'; // 'player' (P1/left) | 'ai' (P2/right)
 
 // AI
-let aiTarget = 0, aiDelayTimer = 0, aiOvershootOff = 0, aiVel = 0;
+let aiErrorOffset = 0, aiErrorTimer = 0;
 
 const keys = {};
 
@@ -293,7 +294,7 @@ function initPaddles() {
   const rx = Math.round(W * (1 - PADDLE_X_MARGIN)) - pw;
   playerPaddle = { x: lx, y: (H - ph) / 2, w: pw, h: ph };
   aiPaddle     = { x: rx, y: (H - ph) / 2, w: pw, h: ph };
-  aiTarget = H / 2; aiDelayTimer = 0; aiOvershootOff = 0; aiVel = 0;
+  aiErrorOffset = 0; aiErrorTimer = 0;
   receivedP2Y = null;
 }
 function resetBall(dir) {
@@ -414,26 +415,20 @@ function updateGuestInput(dt) {
 }
 
 function updateAI(dt) {
-  const cfg    = AI_CFG[difficulty];
-  const maxSpd = BASE_PADDLE_SPD * H * spdMult();
-  if (aiDelayTimer > 0) { aiDelayTimer -= dt; }
-  else {
-    const bc       = ball.y + ball.size / 2;
-    aiOvershootOff = cfg.overshoot * H * (Math.random() > 0.5 ? 1 : -1) * Math.random();
-    aiTarget       = bc + aiOvershootOff;
-    aiDelayTimer   = cfg.delay * (0.6 + Math.random() * 0.8);
+  const cfg = AI_CFG[difficulty];
+
+  // Periodically roll a new random error offset
+  aiErrorTimer -= dt;
+  if (aiErrorTimer <= 0) {
+    aiErrorOffset = cfg.errorMag * H * (Math.random() * 2 - 1);
+    aiErrorTimer  = cfg.errorInterval * (0.7 + Math.random() * 0.6);
   }
-  const diff       = aiTarget - (aiPaddle.y + aiPaddle.h / 2);
-  const deadZone   = H * 0.012; // ignore tiny deviations to avoid micro-jitter
-  const desiredVel = Math.abs(diff) < deadZone
-    ? 0
-    : Math.sign(diff) * Math.min(Math.abs(diff) * 4, maxSpd); // proportional, capped at max
-  // Smooth velocity changes so the paddle can't instantly reverse direction
-  const maxAccel = maxSpd * 3.5;
-  const dv = desiredVel - aiVel;
-  aiVel += Math.sign(dv) * Math.min(Math.abs(dv), maxAccel * dt);
-  aiPaddle.y += aiVel * dt;
-  aiPaddle.y = clamp(aiPaddle.y, 0, H - aiPaddle.h);
+
+  // Smooth lerp toward target (exponential smoothing — fast but never teleports)
+  const bc     = ball.y + ball.size / 2;
+  const target = clamp(bc - aiPaddle.h / 2 + aiErrorOffset, 0, H - aiPaddle.h);
+  aiPaddle.y  += (target - aiPaddle.y) * Math.min(cfg.lerpFactor * dt, 1);
+  aiPaddle.y   = clamp(aiPaddle.y, 0, H - aiPaddle.h);
 }
 
 function updateBall(dt) {
