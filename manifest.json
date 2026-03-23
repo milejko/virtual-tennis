@@ -2,7 +2,7 @@
   "name": "Virtual Tennis",
   "short_name": "VTennis",
   "description": "Single and multiplayer pong game",
-  "start_url": "/",
+  "start_url": "/virtual-tennis/",
   "display": "standalone",
   "orientation": "landscape",
   "background_color": "#000000",
