@@ -3,7 +3,7 @@
   "short_name": "VTennis",
   "description": "Single and multiplayer pong game",
   "start_url": "/",
-  "display": "fullscreen",
+  "display": "standalone",
   "orientation": "landscape",
   "background_color": "#000000",
   "theme_color": "#000000",
